@@ -16,6 +16,15 @@ USAGE
 Example:
     python ia-templatizer.py --expand-directories template.json input.csv output.csv
 
+    # MODS compound-object source with column remapping:
+    python ia-templatizer.py --flatten --mapping mapping.csv template.json mods.csv output.csv
+
+    # Combined template (mapping + options embedded in the JSON):
+    python ia-templatizer.py template.json mods.csv output.csv
+
+    # Combined template with a CLI override:
+    python ia-templatizer.py --flatten template.json mods.csv output.csv
+
 -------------------------------------------------------------------------------
 DETAILS
 -------------------------------------------------------------------------------
@@ -24,6 +33,14 @@ DETAILS
 - Repeatable fields (lists) are expanded into indexed columns (e.g., subject[0], subject[1]).
 - Output CSV columns are ordered for Internet Archive workflows.
 - Control fields are not included in the output unless explicitly specified.
+- --mapping FILE: remap source columns to IA field names using a mapping CSV
+  (columns: SOURCE_COL, IA_FIELD[0], optional IA_FIELD[1]).
+- --delimiter STR: multi-value delimiter used in source cells (default "|@|").
+- --flatten: flatten compound objects before processing (requires --type-col / --page-type).
+- --type-col COL: column identifying row type for flattening (default "type").
+- --page-type VAL: type value for child page rows (default "GraphicalPage").
+- --images-col COL: column with image file path (default "images").
+- --sequence-col COL: column with page sequence number (default "sequence_id").
 -------------------------------------------------------------------------------
 """
 
@@ -39,22 +56,12 @@ from csvutils import load_csv, write_output_csv, dedupe_preserve_order
 from identifier import generate_identifier
 from fields import get_repeatable_fields, detect_mediatype, normalize_rights_statement_field, is_valid_rights_statement, is_valid_licenseurl
 from expand_directories import write_expanded_csv
+from flatten import flatten_compound_objects
+from mapping import load_column_mapping, apply_mapping, buckets_to_flat_row
 
 def is_valid_url(url):
     url_pattern = r'^https?://[^\s]+$'
     return bool(re.match(url_pattern, url))
-
-def normalize_headers(headers):
-    # Lowercase and normalize rightsstatement → rights-statement
-    return [normalize_rights_statement_field(h.lower()) for h in headers]
-
-def normalize_template_fields(template):
-    # Lowercase all keys and normalize rightsstatement → rights-statement
-    norm_template = {}
-    for k, v in template.items():
-        norm_k = normalize_rights_statement_field(k.lower())
-        norm_template[norm_k] = v
-    return norm_template
 
 def validate_metadata_fields(metadata, context="row"):
     rs_val = metadata.get('rights-statement', metadata.get('rightsstatement', ''))
@@ -77,34 +84,203 @@ def main():
     template_path = sys.argv[-3]
     csv_path = sys.argv[-2]
     output_path = sys.argv[-1]
-    flags = sys.argv[1:-3]
-    allowed_flags = {'--expand-directories', '-E'}
+    raw_args = sys.argv[1:-3]
+
+    # ── parse named options ──────────────────────────────────────────────────
+    mapping_path   = None
+    delimiter      = "|@|"
+    do_flatten     = False
+    type_col       = "type"
+    page_type      = "GraphicalPage"
+    images_col     = "images"
+    sequence_col   = "sequence_id"
+
+    flags = []
+    i = 0
+    while i < len(raw_args):
+        arg = raw_args[i]
+        if arg in ('--mapping',):
+            i += 1
+            if i >= len(raw_args):
+                print(f"Error: '{arg}' requires a value.")
+                sys.exit(1)
+            mapping_path = raw_args[i]
+        elif arg in ('--delimiter',):
+            i += 1
+            if i >= len(raw_args):
+                print(f"Error: '{arg}' requires a value.")
+                sys.exit(1)
+            delimiter = raw_args[i]
+        elif arg in ('--type-col',):
+            i += 1
+            if i >= len(raw_args):
+                print(f"Error: '{arg}' requires a value.")
+                sys.exit(1)
+            type_col = raw_args[i]
+        elif arg in ('--page-type',):
+            i += 1
+            if i >= len(raw_args):
+                print(f"Error: '{arg}' requires a value.")
+                sys.exit(1)
+            page_type = raw_args[i]
+        elif arg in ('--images-col',):
+            i += 1
+            if i >= len(raw_args):
+                print(f"Error: '{arg}' requires a value.")
+                sys.exit(1)
+            images_col = raw_args[i]
+        elif arg in ('--sequence-col',):
+            i += 1
+            if i >= len(raw_args):
+                print(f"Error: '{arg}' requires a value.")
+                sys.exit(1)
+            sequence_col = raw_args[i]
+        elif arg in ('--flatten', '--expand-directories', '-E'):
+            if arg == '--flatten':
+                do_flatten = True
+            flags.append(arg)
+        else:
+            flags.append(arg)
+        i += 1
+
+    allowed_flags = {'--expand-directories', '-E', '--flatten'}
     for flag in flags:
         if flag not in allowed_flags:
             print(f"Error: Unknown flag '{flag}'")
-            print(f"Allowed flags: {', '.join(allowed_flags)}")
+            print(f"Allowed flags/options: {', '.join(allowed_flags)}, --mapping FILE, "
+                  f"--delimiter STR, --type-col COL, --page-type VAL, "
+                  f"--images-col COL, --sequence-col COL")
             sys.exit(1)
     expand_dirs = '--expand-directories' in flags or '-E' in flags
 
-    # Load and normalize template
-    template = load_template(template_path)
-    template = normalize_template_fields(template)
+    template, embedded_mapping, embedded_options = load_template(template_path)
     validate_metadata_fields(template, context="template")
 
-    # Load CSV and normalize headers
-    csv_data = load_csv(csv_path)
-    if csv_data:
-        # Normalize headers for all rows
-        orig_headers = list(csv_data[0].keys())
-        norm_headers = normalize_headers(orig_headers)
-        for row in csv_data:
-            for orig, norm in zip(orig_headers, norm_headers):
-                if orig != norm:
-                    row[norm] = row.pop(orig)
+    # ── related URL derivation config (from template defaults) ───────────────
+    related_url_base = template.get('related-url-base', '').strip()
+    related_url_col  = (template.get('related-url-col', '') or '').strip() or 'node_uuid'
+
+    # ── apply embedded options as defaults (CLI flags take precedence) ───────
+    # Only set from embedded_options when the value hasn't been explicitly
+    # supplied on the command line (i.e. it still holds its hard-coded default).
+    _cli_set = set()  # track which options were set via CLI
+    # (We re-parse raw_args minimally just to know what was explicit)
+    _i = 0
+    while _i < len(raw_args):
+        _a = raw_args[_i]
+        if _a in ('--mapping', '--delimiter', '--type-col', '--page-type',
+                  '--images-col', '--sequence-col'):
+            _cli_set.add(_a)
+            _i += 2
+        elif _a in ('--flatten', '--expand-directories', '-E'):
+            _cli_set.add(_a)
+            _i += 1
+        else:
+            _i += 1
+
+    if embedded_options:
+        if 'delimiter'    not in _cli_set and 'delimiter'    in embedded_options:
+            delimiter    = embedded_options['delimiter']
+        if 'type_col'     not in _cli_set and 'type_col'     in embedded_options:
+            type_col     = embedded_options['type_col']
+        if 'page_type'    not in _cli_set and 'page_type'    in embedded_options:
+            page_type    = embedded_options['page_type']
+        if 'images_col'   not in _cli_set and 'images_col'   in embedded_options:
+            images_col   = embedded_options['images_col']
+        if 'sequence_col' not in _cli_set and 'sequence_col' in embedded_options:
+            sequence_col = embedded_options['sequence_col']
+        if '--flatten'    not in _cli_set and embedded_options.get('flatten'):
+            do_flatten   = True
+
+    # ── resolve mapping: CLI --mapping overrides embedded mapping ────────────
+    if mapping_path:
+        column_mapping = load_column_mapping(mapping_path)
+        _mapping_source = f"'{mapping_path}'"
+    elif embedded_mapping is not None:
+        column_mapping = embedded_mapping
+        _mapping_source = "embedded in template"
+    else:
+        column_mapping = None
+        _mapping_source = None
+
+    # ── load CSV ─────────────────────────────────────────────────────────────
+    import csv as _csv
+    with open(csv_path, newline="", encoding="utf-8") as fh:
+        reader = _csv.DictReader(fh)
+        raw_fieldnames = list(reader.fieldnames or [])
+        raw_rows = list(reader)
+    print(f"Input rows : {len(raw_rows)}")
+
+    # ── step 0a: flatten compound objects (optional) ──────────────────────────
+    if do_flatten:
+        raw_rows = flatten_compound_objects(
+            raw_rows, raw_fieldnames,
+            type_col=type_col,
+            page_type=page_type,
+            images_col=images_col,
+            sequence_col=sequence_col,
+        )
+        n_item  = sum(1 for r in raw_rows if r.get(type_col, "").strip())
+        n_image = len(raw_rows) - n_item
+        print(f"Flattened  : {len(raw_rows)} rows  "
+              f"({n_item} item rows + {n_image} image-only rows)")
+
+    # ── step 0b: remap columns (optional) ────────────────────────────────────
+    if column_mapping is not None:
+        mapped_src_cols = {src for src, _ in column_mapping}
+        for src_col in mapped_src_cols:
+            if src_col not in raw_fieldnames:
+                print(f"  WARNING: mapping references '{src_col}' "
+                      f"which is not in the input CSV")
+        bucket_rows = apply_mapping(
+            raw_rows, column_mapping,
+            images_col=images_col,
+            delimiter=delimiter,
+            source_fieldnames=raw_fieldnames,
+        )
+        # Determine which IA fields are non-repeatable for flat conversion
+        _non_rep_for_mapping = {
+            "identifier", "file", "mediatype", "color", "date", "licenseurl",
+            "rights", "rights-statement", "publisher", "summary",
+            "ai-note", "ai-summary", "title", "creator", "volume", "year", "issue"
+        }
+        csv_data = [
+            buckets_to_flat_row(b, _non_rep_for_mapping)
+            for b in bucket_rows
+        ]
+        print(f"Mapped cols: remapped {len(raw_rows)} rows via {_mapping_source}")
+    else:
+        csv_data = [{
+            k: v.strip() if isinstance(v, str) else v
+            for k, v in row.items()
+        } for row in raw_rows]
+
+    # ── inject UUID-derived related URL at position 0 of each item row ───────
+    if related_url_base:
+        for data_row, raw_row in zip(csv_data, raw_rows):
+            if data_row.get('_inherited_identifier') == '1':
+                continue  # skip continuation rows
+            uuid_val = (
+                data_row.get(related_url_col, '').strip()
+                or raw_row.get(related_url_col, '').strip()
+            )
+            if uuid_val:
+                derived_url = related_url_base.rstrip('/') + '/' + uuid_val
+                # Shift any existing related[n] up by one slot to insert at [0]
+                existing = sorted(
+                    [k for k in data_row if re.match(r'^related\[\d+\]$', k)],
+                    key=lambda k: int(k.split('[')[1].rstrip(']')),
+                    reverse=True,
+                )
+                for k in existing:
+                    n = int(k.split('[')[1].rstrip(']'))
+                    data_row[f'related[{n + 1}]'] = data_row.pop(k)
+                data_row['related[0]'] = derived_url
 
     # Control fields used for logic, not output (support both hyphen and underscore)
     control_fields = {
-        "identifier-date", "identifier_prefix", "identifier-prefix", "identifier_basename"
+        "identifier-date", "identifier_prefix", "identifier-prefix", "identifier_basename",
+        "related-url-base", "related-url-col"
     }
 
     # Non-repeatable fields (for repeatable field detection)
@@ -117,10 +293,18 @@ def main():
     repeatable_fields = get_repeatable_fields(template, non_repeatable_fields)
     repeatable_field_values = {field: template[field] for field in repeatable_fields}
 
+    # Ensure 'related' is treated as a repeatable field whenever a URL base is
+    # configured, even if the template has no static 'related' list.
+    if related_url_base and 'related' not in repeatable_fields:
+        repeatable_fields.append('related')
+        repeatable_field_values['related'] = template.get('related', [])
+
     output_data = []
     existing_identifiers = set()
 
+    # We'll collect subject[n] and collection[n] columns for final ordering
     def get_repeatable_input(row, field):
+        # If subject[n] columns exist, use those values
         n_keys = sorted([k for k in row.keys() if k.startswith(f"{field}[")], key=lambda x: int(x.split("[")[1].split("]")[0]))
         vals = []
         if n_keys:
@@ -128,9 +312,11 @@ def main():
                 val = row[k]
                 if val:
                     vals.append(val.strip() if isinstance(val, str) else val)
+            # Remove subject[n] columns from row
             for k in n_keys:
                 del row[k]
         else:
+            # Otherwise, look for subject/subjects/keywords and split on semicolons
             keys = [k for k in row.keys() if k.lower() == field or k.lower() == field + "s" or (field == "subject" and k.lower() == "keywords")]
             for k in keys:
                 val = row[k]
@@ -139,13 +325,24 @@ def main():
                         vals.extend([v.strip() for v in val if isinstance(v, str) and v.strip()])
                     elif isinstance(val, str):
                         vals.extend([v.strip() for v in val.split(";") if v.strip()])
+            # Remove original fields from row
             for k in keys:
                 if k in row:
                     del row[k]
         return vals
 
     for row in csv_data:
-        # All keys are already normalized to lowercase and rights-statement
+        # Normalize field names; strip internal mapping markers
+        normalized_row = {}
+        inherited_id = False
+        for k, v in row.items():
+            if k == "_inherited_identifier":
+                inherited_id = bool(v)
+                continue
+            norm_k = normalize_rights_statement_field(k)
+            normalized_row[norm_k] = v.strip() if isinstance(v, str) else v
+        row = normalized_row
+
         # Expand all repeatable fields: template values first, then input values, deduped
         for field in repeatable_fields:
             template_vals = repeatable_field_values.get(field, [])
@@ -179,6 +376,7 @@ def main():
                     continue
                 if field not in new_row or not new_row[field]:
                     new_row[field] = value
+            # Expand repeatable fields for directory row
             for field in repeatable_fields:
                 template_vals = repeatable_field_values.get(field, [])
                 input_vals = get_repeatable_input(new_row, field)
@@ -210,11 +408,13 @@ def main():
         if template.get('mediatype', '').upper() == 'DETECT':
             file_val = new_row.get('file', '')
             detected_type = detect_mediatype(file_val)
+            # If file is a directory or unknown type, set mediatype to "data"
             if not detected_type or (file_val and os.path.isdir(file_val)):
                 new_row['mediatype'] = 'data'
             else:
                 new_row['mediatype'] = detected_type
 
+        # Expand repeatable fields for main output row
         for field in repeatable_fields:
             template_vals = repeatable_field_values.get(field, [])
             input_vals = get_repeatable_input(new_row, field)
@@ -222,21 +422,28 @@ def main():
             for i, val in enumerate(all_vals):
                 new_row[f"{field}[{i}]"] = val
 
+        # Remove original repeatable fields from output
         for field in repeatable_fields:
             if field in new_row and isinstance(new_row[field], list):
                 del new_row[field]
 
+        # Remove control fields from output
         for field in control_fields:
             if field in new_row:
                 del new_row[field]
 
         identifier_date = template.get('identifier-date', '')
-        new_row['identifier'] = generate_identifier(new_row, template, identifier_date, existing_identifiers)
+        if inherited_id and new_row.get('identifier'):
+            # Continuation row: keep the inherited parent identifier as-is
+            existing_identifiers.add(new_row['identifier'])
+        else:
+            new_row['identifier'] = generate_identifier(new_row, template, identifier_date, existing_identifiers)
 
         output_data.append(new_row)
 
     # Build fieldnames for output: identifier, file, mediatype, collection[n], title, date, creator, description, subject[n], extras
     all_cols = set().union(*(row.keys() for row in output_data))
+    all_cols.discard("_inherited_identifier")
     exclude_subject_keys = {"subject", "subjects", "keywords"}
     exclude_collection_keys = {"collection", "collections"}
 
@@ -248,7 +455,20 @@ def main():
         [col for col in all_cols if col.startswith("subject[")],
         key=lambda x: int(x.split("[")[1].split("]")[0])
     )
-    extra_cols = [
+    # Preferred ordering for non-subject, non-collection extra columns
+    EXTRA_FIELD_ORDER = [
+        "rights-statement", "rights", "licenseurl",
+        "alternative_title", "subtitle",
+        "genre", "contributor", "language", "extent",
+        "abstract", "notes", "source", "location",
+        "publisher", "summary", "color",
+        "related",
+        "ai-note", "ai-summary",
+        "inclusive-description-statement",
+    ]
+    _extra_anchor = {f: i for i, f in enumerate(EXTRA_FIELD_ORDER)}
+
+    extra_cols_set = {
         col for col in all_cols
         if col not in {
             "identifier", "file", "mediatype", "title", "date", "creator", "description"
@@ -258,8 +478,17 @@ def main():
         and col.lower() not in exclude_collection_keys
         and not col.startswith("subject[")
         and not col.startswith("collection[")
-    ]
+    }
+    # Sort: known fields first (by preferred order), then indexed variants of
+    # those fields, then remaining fields alphabetically.
+    def _extra_sort_key(col):
+        base = col.split("[")[0]
+        idx  = int(col.split("[")[1].split("]")[0]) if "[" in col else -1
+        return (_extra_anchor.get(base, len(EXTRA_FIELD_ORDER)), base, idx)
 
+    extra_cols = sorted(extra_cols_set, key=_extra_sort_key)
+
+    # Insert collection[n] after mediatype, subject[n] after description
     fieldnames = [
         "identifier", "file", "mediatype"
     ] + collection_n_cols + [

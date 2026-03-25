@@ -1,14 +1,250 @@
-# IA Templatizer User & Developer Manual
+# IA Templatizer — Usage Guide
+
+**IA Templatizer** is a command-line Python tool for batch-generating metadata CSV files for Internet Archive ingest. It applies a JSON template to an input CSV, fills in default values, generates standardized identifiers, expands repeatable fields, and validates metadata. The output is a correctly formatted CSV for use with the Internet Archive CLI or Python library.
+
+> **Full documentation:** see `IA-Templatizer-User-and-Developer-Manual.md` and `Student-Programmer-Reference.md`
 
 ---
 
-## Overview
+## Requirements
 
-**IA Templatizer** is a command-line tool for batch-generating metadata CSV files for Internet Archive workflows.  
-It applies a user-defined metadata template (JSON) to an input CSV, filling in missing fields, generating standardized identifiers, expanding repeatable fields, and validating metadata.  
-The output is a new CSV formatted for compatibility with Internet Archive CLI tools and Python library.
+- Python 3.7 or newer (standard library only — no third-party packages required)
 
-This tool is designed for a wide range of archival materials, including historical photographs, scanned texts, audio/video, and born-digital data.
+---
+
+## Command Syntax
+
+```
+python ia-templatizer.py [options] <template.json> <input.csv> <output.csv>
+```
+
+### Options
+
+| Option | Argument | Description |
+|---|---|---|
+| `--expand-directories` / `-E` | — | Expand directory paths in `file` column into per-file output sheets |
+| `--flatten` | — | Flatten compound objects (item row + child page rows) before processing |
+| `--mapping FILE` | CSV path | Load a column-mapping CSV; overrides any mapping embedded in the template |
+| `--delimiter STR` | string | Multi-value delimiter in source cells (default: `\|@\|`) |
+| `--type-col COL` | column name | Column identifying row type for flattening (default: `type`) |
+| `--page-type VAL` | string | Value marking a child page row (default: `GraphicalPage`) |
+| `--images-col COL` | column name | Column containing the image/file path (default: `images`) |
+| `--sequence-col COL` | column name | Column with page sequence number (default: `sequence_id`) |
+
+CLI options always override values embedded in the template's `"options"` section.
+
+---
+
+## Template Formats
+
+### Flat format (standard mode)
+
+All metadata fields and control fields at the top level. Best for file listings and manually prepared CSVs.
+
+```json
+{
+  "identifier-prefix": "hamilton",
+  "mediatype": "image",
+  "collection": ["hamilton"],
+  "creator": "Hamilton College",
+  "rights-statement": "http://rightsstatements.org/vocab/NKC/1.0/",
+  "subject": ["Hamilton College", "Photographs"],
+  "notes": "Digitized by LITS Digital Collections, Hamilton College"
+}
+```
+
+### Combined format (MODS pipeline)
+
+Introduced in v3.1. Wraps defaults, column mapping, and runtime options in three named sections. No separate mapping CSV or CLI flags needed.
+
+```json
+{
+  "defaults": { ... },
+  "mapping": { "source_col": "ia_field", ... },
+  "options": { "flatten": false, "images_col": "files", "delimiter": "|@|" }
+}
+```
+
+The format is detected automatically.
+
+### Control fields (never written to output)
+
+| Field | Effect |
+|---|---|
+| `identifier-prefix` | Prepended to every generated identifier |
+| `identifier-date` | Date string embedded in identifier; `"TRUE"` uses each row's `date` value |
+| `identifier-basename` | Fixed string replacing the file-derived identifier component |
+| `related-url-base` | Base URL prepended to each row's UUID value to generate `related[0]` (e.g. `"https://litsdigital.hamilton.edu/do/"`) |
+| `related-url-col` | Source column name holding the UUID; defaults to `node_uuid` when `related-url-base` is set |
+
+### Repeatable fields
+
+Any template field whose value is a **list** becomes repeatable — the tool expands it into indexed output columns (`subject[0]`, `subject[1]`, …). Template values come first, followed by deduplicated values from the source CSV. This applies to `subject`, `collection`, `source`, `related`, and any other list field in `"defaults"`.
+
+The `related` field is also activated automatically when `related-url-base` is set, even if no static `"related"` list appears in the template.
+
+---
+
+## MODS Pipeline
+
+Use this mode when your source CSV comes from a CONTENTdm/MODS export, where column names are MODS element paths (e.g., `mods_titleinfo_title`) and multi-value cells use a `|@|` delimiter.
+
+### Column mapping
+
+Each entry in `"mapping"` translates a source CSV column to one or two IA field names:
+
+```json
+"mapping": {
+  "mods_titleinfo_title": "title",
+  "mods_subject_topic": "subject",
+  "mods_genre_authority_local": ["genre", "subject"]
+}
+```
+
+Multiple source columns may map to the same IA field — values are merged and deduplicated.
+
+### The `!` override prefix
+
+Prefix a target field with `!` to **replace** any previously collected values for that field rather than appending. Use this when a later, more specific source should win.
+
+```json
+"mods_origininfo_dateissued": "date",
+"date_full": "!date"
+```
+
+`mods_origininfo_dateissued` first puts the raw ISO timestamp (`1876-03-30T00:00:00Z`) into the `date` bucket. When `date_full` is processed, the `!` clears the bucket and replaces it with the human-readable value (`1876-03-30`). The `!` source must appear **after** the field it overrides in the mapping.
+
+### Compound object flattening
+
+MODS exports represent compound objects as one item row followed by N child `GraphicalPage` rows. With `"flatten": true`, the tool:
+
+1. Assigns the first child's image path to the item row.
+2. Converts remaining children into blank continuation rows (image path only).
+
+All pages of a compound object share the same IA identifier.
+
+---
+
+## Worked Example: American Socialist Newspapers
+
+The *American Socialist* (1876–1879) is a weekly newspaper held at Hamilton College. The source data is a MODS export (`MODS_Oneida_American_Socialist_ZIPs.csv`) where each row is one issue and file paths point to ZIP archives of page images.
+
+### Run the pipeline
+
+```bash
+python ia-templatizer.py \
+  templates/template_oneida-american-socialist.json \
+  MODS_Oneida_American_Socialist_ZIPs.csv \
+  american-socialist-out.csv
+```
+
+No additional flags are needed — all options are embedded in the template.
+
+### Template: `templates/template_oneida-american-socialist.json`
+
+```json
+{
+  "defaults": {
+    "mediatype": "texts",
+    "collection": ["hamilton"],
+    "rights-statement": "http://rightsstatements.org/vocab/NKC/1.0/",
+    "rights": "For questions ... Hamilton College Special Collections ...",
+    "subject": [
+      "Hamilton College", "Oneida Community", "Communal societies",
+      "Intentionalism", "Utopian socialism", "Socialism",
+      "Noyes, John Humphrey, 1811-1886", "Periodicals", "Newspapers"
+    ],
+    "notes": "Digitized by LITS Digital Collections, Hamilton College",
+    "source": [
+      "Hamilton College Library Rare Books and Special Collections",
+      "Communal Societies Collection",
+      "Oneida Community Collection",
+      "Folio HX656.O5 A46",
+      "Hamilton College Library, Clinton, New York, United States"
+    ]
+  },
+  "mapping": {
+    "mods_identifier_local": "identifier",
+    "files": "file",
+    "mods_titleinfo_title": "title",
+    "mods_name_personal_namepart_refined": "creator",
+    "mods_personal_name_author": "creator",
+    "mods_origininfo_dateissued": "date",
+    "date_full": "!date",
+    "mods_language_languageterm_text": "language",
+    "mods_physicaldescription_extent": "extent",
+    "mods_note": "notes",
+    "mods_genre_authority_local": "genre",
+    "mods_genre_subgenre_authority_local": "genre",
+    "mods_subject_geographic": "subject",
+    "mods_subject_topic": "subject",
+    "mods_subject_family_name": "subject",
+    "mods_origininfo_place_placeterm_text": "location",
+    "mods_accesscondition_use_and_reproduction": "rights-statement"
+  },
+  "options": {
+    "flatten": false,
+    "images_col": "files",
+    "delimiter": "|@|"
+  }
+}
+```
+
+**Key design decisions in this template:**
+
+- `"flatten": false` — no compound objects; each row is a single issue
+- `"images_col": "files"` — source CSV uses `files` (not the default `images`) for file paths
+- `source` is in `defaults` as a fixed list — the MODS shelf-locator columns produce inconsistently split values, so the correct values are hardcoded once here
+- `date_full → "!date"` — overrides the raw ISO timestamp from `mods_origininfo_dateissued`
+- `creator` is mapped from two source columns (`mods_name_personal_namepart_refined` and `mods_personal_name_author`); values are deduplicated if both are populated
+
+
+### Sample output row
+
+| Field | Value |
+|---|---|
+| `identifier` | `american-socialist-1876-03-30` |
+| `file` | `american-socialist-1876-03-30.zip` |
+| `mediatype` | `texts` |
+| `collection[0]` | `hamilton` |
+| `title` | `American socialist, vol. 01, no. 01 (March 30, 1876)` |
+| `creator` | `Noyes, John Humphrey, 1811-1886` |
+| `date` | `1876-03-30` |
+| `subject[0]` | `Hamilton College` |
+| `subject[6]` | `Noyes, John Humphrey, 1811-1886` |
+| `source[0]` | `Hamilton College Library Rare Books and Special Collections` |
+| `rights-statement` | `http://rightsstatements.org/vocab/NKC/1.0/` |
+
+---
+
+## Adapting to a New MODS Collection
+
+1. Copy an existing combined template as a starting point.
+2. Update `"defaults"` — subjects, rights statement, mediatype, notes, and any fixed `source` values.
+3. Update `"mapping"` — check the source CSV header row and replace column names as needed.
+4. Set `"options"` — `"flatten": true` only if the CSV has compound objects; set `"images_col"` to match the file-path column name.
+5. Test: `python ia-templatizer.py templates/template_NEW.json SOURCE.csv test-out.csv`
+6. Review `test-out.csv` — check identifiers, dates, subject list, and source values.
+
+---
+
+## Output Column Order
+
+`identifier` → `file` → `mediatype` → `collection[n]` → `title` → `date` → `creator` → `description` → `subject[n]` → `rights-statement` → `rights` → `genre[n]` → `language[n]` → `extent[n]` → `notes` → `source[n]` → `location[n]` → `related[n]` → *(remaining columns alphabetically)*
+
+---
+
+## Common Issues
+
+| Symptom | Fix |
+|---|---|
+| Raw ISO timestamp in `date` output | Map the date-full column to `"!date"` and place it **after** the timestamp column in the mapping |
+| `creator[0]` instead of `creator` | Add `"creator": ""` to `"defaults"` to anchor it as non-repeatable |
+| `source` values split incorrectly from `\|@\|` cells | Move `source` out of `mapping` and into `defaults` as a hardcoded list |
+| `WARNING: mapping references 'col'...` | Column name in mapping doesn't match CSV header — check for typos |
+| Pages out of order (compound objects) | Verify `"sequence_col"` matches the actual numeric column in the source CSV |
+| Identifier not generated | Ensure `file` or `identifier` column is present in source, or set `identifier-prefix` in defaults |
+| `related[0]` not in output | Ensure `"related-url-base"` is set in `"defaults"` and the source CSV has a `node_uuid` column (or set `"related-url-col"` to the correct column name) |
 
 ---
 
