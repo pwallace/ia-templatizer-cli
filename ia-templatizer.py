@@ -93,7 +93,11 @@ def main():
     type_col       = "type"
     page_type      = "GraphicalPage"
     images_col     = "images"
+    file_columns   = None
     sequence_col   = "sequence_id"
+    # Default behaviour: when template does not specify an explicit value,
+    # preserve parent item rows and drop child page rows (Archipelago-style).
+    drop_child_pages = True
 
     flags = []
     i = 0
@@ -129,6 +133,12 @@ def main():
                 print(f"Error: '{arg}' requires a value.")
                 sys.exit(1)
             images_col = raw_args[i]
+        elif arg in ('--file-columns',):
+            i += 1
+            if i >= len(raw_args):
+                print(f"Error: '{arg}' requires a value.")
+                sys.exit(1)
+            file_columns = [s.strip() for s in raw_args[i].split(',') if s.strip()]
         elif arg in ('--sequence-col',):
             i += 1
             if i >= len(raw_args):
@@ -138,12 +148,19 @@ def main():
         elif arg in ('--flatten', '--expand-directories', '-E'):
             if arg == '--flatten':
                 do_flatten = True
+        elif arg in ('--drop-child-pages',):
+            drop_child_pages = True
+            flags.append(arg)
+        elif arg in ('--keep-child-pages',):
+            # CLI flag to explicitly keep/emit child page continuation rows
+            # (legacy behaviour). This sets `drop_child_pages` to False.
+            drop_child_pages = False
             flags.append(arg)
         else:
             flags.append(arg)
         i += 1
 
-    allowed_flags = {'--expand-directories', '-E', '--flatten'}
+    allowed_flags = {'--expand-directories', '-E', '--flatten', '--drop-child-pages', '--keep-child-pages'}
     for flag in flags:
         if flag not in allowed_flags:
             print(f"Error: Unknown flag '{flag}'")
@@ -169,10 +186,11 @@ def main():
     while _i < len(raw_args):
         _a = raw_args[_i]
         if _a in ('--mapping', '--delimiter', '--type-col', '--page-type',
-                  '--images-col', '--sequence-col'):
+                  '--images-col', '--sequence-col', '--file-columns'):
             _cli_set.add(_a)
             _i += 2
-        elif _a in ('--flatten', '--expand-directories', '-E'):
+        elif _a in ('--flatten', '--expand-directories', '-E', '--drop-child-pages', '--keep-child-pages'):
+            # Flags without a following value
             _cli_set.add(_a)
             _i += 1
         else:
@@ -187,8 +205,16 @@ def main():
             page_type    = embedded_options['page_type']
         if 'images_col'   not in _cli_set and 'images_col'   in embedded_options:
             images_col   = embedded_options['images_col']
+        if 'file_columns' not in _cli_set and 'file_columns' in embedded_options:
+            file_columns = embedded_options['file_columns']
         if 'sequence_col' not in _cli_set and 'sequence_col' in embedded_options:
             sequence_col = embedded_options['sequence_col']
+        # Respect an explicit drop_child_pages value in the template. CLI
+        # flags take precedence; if the user passed either --drop-child-pages
+        # or --keep-child-pages it is already recorded in `_cli_set` and we
+        # should not override it here.
+        if 'drop_child_pages' in embedded_options and ('--drop-child-pages' not in _cli_set and '--keep-child-pages' not in _cli_set):
+            drop_child_pages = bool(embedded_options['drop_child_pages'])
         if '--flatten'    not in _cli_set and embedded_options.get('flatten'):
             do_flatten   = True
 
@@ -213,12 +239,24 @@ def main():
 
     # ── step 0a: flatten compound objects (optional) ──────────────────────────
     if do_flatten:
+        # Determine final candidate file columns: CLI --file-columns takes
+        # precedence, then embedded template 'file_columns', then legacy
+        # --images-col / embedded 'images_col'. Normalise to a list which is
+        # accepted by flatten and apply_mapping.
+        if file_columns:
+            final_file_columns = file_columns
+        elif isinstance(images_col, list):
+            final_file_columns = images_col
+        else:
+            final_file_columns = [images_col]
+
         raw_rows = flatten_compound_objects(
             raw_rows, raw_fieldnames,
             type_col=type_col,
             page_type=page_type,
-            images_col=images_col,
+            images_col=final_file_columns,
             sequence_col=sequence_col,
+            drop_child_pages=drop_child_pages,
         )
         n_item  = sum(1 for r in raw_rows if r.get(type_col, "").strip())
         n_image = len(raw_rows) - n_item
@@ -232,9 +270,19 @@ def main():
             if src_col not in raw_fieldnames:
                 print(f"  WARNING: mapping references '{src_col}' "
                       f"which is not in the input CSV")
+        # Ensure the same final file-columns list is passed to mapping so
+        # implicit file mapping and continuation-row detection behave the
+        # same way as the flatten step.
+        if file_columns:
+            final_file_columns = file_columns
+        elif isinstance(images_col, list):
+            final_file_columns = images_col
+        else:
+            final_file_columns = [images_col]
+
         bucket_rows = apply_mapping(
             raw_rows, column_mapping,
-            images_col=images_col,
+            images_col=final_file_columns,
             delimiter=delimiter,
             source_fieldnames=raw_fieldnames,
         )

@@ -383,6 +383,8 @@ This module handles MODS-derived CSVs that use the CONTENTdm compound-object exp
 - `page_type` (str) — Value that marks a child page row. Default: `"GraphicalPage"`.
 - `images_col` (str) — Column containing the image path. Default: `"images"`.
 - `sequence_col` (str) — Column containing the page sequence number. Default: `"sequence_id"`.
+ - `images_col` (str or list) — Column name or list of candidate column names containing the image/file path. The function will check candidates in order and use the first non-empty value. Default: `"images"`.
+ - `drop_child_pages` (bool) — When `True` (the default when the template omits an explicit value) child page rows are dropped and only the parent item rows are preserved. When `False` the legacy behaviour is used: the first child image is attached to the parent and remaining pages become blank continuation rows. Default: `True`.
 
 **Outputs:** `list[dict]` — Flattened rows.
 

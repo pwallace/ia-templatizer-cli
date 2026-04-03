@@ -1,0 +1,56 @@
+{
+  "defaults": {
+    "mediatype": "image",
+    "related-url-base": "https://litsdigital.hamilton.edu/do/",
+    "collection": ["hamilton"],
+    "rights-statement": "http://rightsstatements.org/vocab/NKC/1.0/",
+    "rights": "For questions or information about duplication, licensing, or copyright status for this item, contact <a href=\"https://www.hamilton.edu/offices/lits/special-collections\" rel=\"ugc nofollow\">Hamilton College Special Collections</a>.",
+    "subject": [
+      "Hamilton College",
+      "Communial societies",
+      "Amana Society",
+      "Community of True Inspiration",
+      "Religious societies",
+      "Pietism"
+    ],
+    "notes": "Digitized by LITS Digital Collections, Hamilton College"
+  },
+  "mapping": {
+    "mods_identifier_local": "identifier",
+    "images": "file",
+    "mods_titleinfo_title": "title",
+    "mods_titleinfo_subtitle": "subtitle",
+    "mods_titleinfo_alternative_title": "alternative_title",
+    "mods_genre_authority_local": ["genre", "subject"],
+    "mods_genre_subgenre_authority_local": ["genre", "subject"],
+    "mods_name_personal_namepart_refined": "creator",
+    "mods_origininfo_dateissued": "date",
+    "mods_origininfo_dateother": "date",
+    "date_full": "!date",
+    "mods_language_languageterm_text": "language",
+    "mods_physicaldescription_extent": "extent",
+    "mods_abstract": "abstract",
+    "mods_note": "notes",
+    "mods_subject_topic": "subject",
+    "mods_subject_geographic": "subject",
+    "mods_subject_temporal": "subject",
+    "mods_subject_name_personal": "subject",
+    "mods_subject_name_corporate": "subject",
+    "mods_subject_name_geographic": "subject",
+    "mods_subject_familyname": "subject",
+    "mods_location_shelflocator": "source",
+    "mods_relateditem_host_titleinfo_title": "source",
+    "mods_recordinfo_recordcontentsource": "source",
+    "mods_relateditem_host_location_physicallocation": "location",
+    "mods_accesscondition_use_and_reproduction": "rights-statement"
+  },
+  "options": {
+    "flatten": true,
+    "file_columns": ["images"],
+    "drop_child_pages": false,
+    "sequence_col": "sequence_id",
+    "type_col": "type",
+    "page_type": "GraphicalPage",
+    "delimiter": "|@|"
+  }
+}

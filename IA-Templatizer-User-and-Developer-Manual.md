@@ -144,7 +144,7 @@ Introduced in version 3.1. Wraps defaults, column mapping, and runtime options i
   },
   "options": {
     "flatten": false,
-    "images_col": "files",
+    "file_columns": ["files"],
     "delimiter": "|@|"
   }
 }
@@ -157,7 +157,9 @@ The `"defaults"` section is equivalent to the body of a flat-format template. Th
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `flatten` | boolean | `false` | Flatten compound objects before processing. |
-| `images_col` | string | `"images"` | Column containing the image/file path. |
+| `images_col` | string | `"images"` | Column containing the image/file path (legacy name; prefer `file_columns`). |
+| `file_columns` | array|string | `"images"` | Candidate file-column names (list or comma-separated string). The tool checks candidates in order and uses the first non-empty value. When omitted, the legacy `images_col` (or `images`) is used. |
+| `drop_child_pages` | boolean | `true` | When `true` (the default when the template omits an explicit value) child page rows are dropped and only parent item rows are emitted. Set to `false` to use the legacy behaviour that attaches page images to the parent and emits continuation rows. |
 | `sequence_col` | string | `"sequence_id"` | Column with page sequence number (used during flattening). |
 | `type_col` | string | `"type"` | Column identifying row type (used during flattening). |
 | `page_type` | string | `"GraphicalPage"` | Value in `type_col` that marks a child page row. |
@@ -258,7 +260,7 @@ Continuation rows (image-only rows produced by compound-object flattening) are s
 
 MODS exports from CONTENTdm represent compound objects as a block of rows: one item-level row followed by N child `GraphicalPage` rows, each with a single image file path. Flattening converts this structure into:
 
-1. The item row receives the first child page's image path (in `images_col`).
+1. The item row receives the first child page's image path (from the first non-empty `file_columns` candidate).
 2. Each remaining child page becomes a blank continuation row containing only its image path.
 
 The sequence order of child pages is respected (via `sequence_col`). Continuation rows carry the parent item's identifier so that all pages of a compound object share one IA identifier.
@@ -373,7 +375,7 @@ Returns a 3-tuple. For flat-format templates, `column_mapping` is `None` and `op
 
 `load_column_mapping(source)` accepts a CSV file path (str), a dict (from an already-parsed JSON mapping), or a list (passed through unchanged). Returns the canonical `[(source_col, [ia_fields])]` list.
 
-`apply_mapping(rows, column_mapping, images_col, delimiter, source_fieldnames)` translates source column names to IA field-name buckets. Multi-value cells are split on `delimiter`. A `!`-prefixed target replaces the bucket contents instead of appending. Image-only continuation rows (all fields blank except `images_col`) receive the previous item row's identifier and a `_inherited_identifier` marker.
+`apply_mapping(rows, column_mapping, file_columns, delimiter, source_fieldnames)` translates source column names to IA field-name buckets. Multi-value cells are split on `delimiter`. A `!`-prefixed target replaces the bucket contents instead of appending. Image-only continuation rows (all fields blank except the file-column candidate) receive the previous item row's identifier and a `_inherited_identifier` marker.
 
 `buckets_to_flat_row(buckets, non_repeatable_fields)` converts bucket dicts (`{field: [values]}`) to flat row dicts. Non-repeatable fields keep only their first value; repeatable fields are emitted as indexed columns (`field[0]`, `field[1]`, …).
 
@@ -381,7 +383,7 @@ Returns a 3-tuple. For flat-format templates, `column_mapping` is `None` and `op
 
 **`flatten.py`**
 
-`flatten_compound_objects(rows, fieldnames, type_col, page_type, images_col, sequence_col)` consumes item + child-page row blocks and emits: the item row (with first child's image), then one blank continuation row per additional child page (image path only), in sequence order.
+`flatten_compound_objects(rows, fieldnames, type_col, page_type, file_columns, sequence_col)` consumes item + child-page row blocks and emits: the item row (with first child's image), then one blank continuation row per additional child page (image path only), in sequence order.
 
 ---
 
@@ -512,7 +514,7 @@ python ia-templatizer.py \
 1. Copy `templates/template_amana.json` or `templates/template_oneida-american-socialist.json` as a starting point.
 2. Update `"defaults"` with the new collection's base subjects, rights statement, and mediatype.
 3. Update `"mapping"` to match the column names in the new MODS CSV (check the CSV header row).
-4. Set `"options"` appropriately (`"flatten": true/false`, `"images_col"`, etc.).
+4. Set `"options"` appropriately (`"flatten": true/false`, `"file_columns"`, etc.).
 5. Run a test:
    ```bash
    python ia-templatizer.py templates/template_NEW.json SOURCE_MODS.csv test-out.csv

@@ -28,7 +28,7 @@ python ia-templatizer.py [options] <template.json> <input.csv> <output.csv>
 | `--delimiter STR` | string | Multi-value delimiter in source cells (default: `\|@\|`) |
 | `--type-col COL` | column name | Column identifying row type for flattening (default: `type`) |
 | `--page-type VAL` | string | Value marking a child page row (default: `GraphicalPage`) |
-| `--images-col COL` | column name | Column containing the image/file path (default: `images`) |
+| `--file-columns COL` | column name(s) | Comma-separated candidate file-column names (default: `images`) |
 | `--sequence-col COL` | column name | Column with page sequence number (default: `sequence_id`) |
 
 CLI options always override values embedded in the template's `"options"` section.
@@ -61,7 +61,7 @@ Introduced in v3.1. Wraps defaults, column mapping, and runtime options in three
 {
   "defaults": { ... },
   "mapping": { "source_col": "ia_field", ... },
-  "options": { "flatten": false, "images_col": "files", "delimiter": "|@|" }
+  "options": { "flatten": false, "file_columns": ["files"], "delimiter": "|@|" }
 }
 ```
 
@@ -222,7 +222,7 @@ No additional flags are needed — all options are embedded in the template.
 1. Copy an existing combined template as a starting point.
 2. Update `"defaults"` — subjects, rights statement, mediatype, notes, and any fixed `source` values.
 3. Update `"mapping"` — check the source CSV header row and replace column names as needed.
-4. Set `"options"` — `"flatten": true` only if the CSV has compound objects; set `"images_col"` to match the file-path column name.
+4. Set `"options"` — `"flatten": true` only if the CSV has compound objects; set `"file_columns"` to match the file-path column name(s) (comma-separated or JSON array).
 5. Test: `python ia-templatizer.py templates/template_NEW.json SOURCE.csv test-out.csv`
 6. Review `test-out.csv` — check identifiers, dates, subject list, and source values.
 
@@ -260,6 +260,7 @@ No additional flags are needed — all options are embedded in the template.
 - **Robust error handling:** Clear error messages for missing files, invalid formats, and unsupported values.
 - **Directory expansion:** Optionally expand directory paths in the input CSV to generate additional output sheets for their contents.
 - **Extensible codebase:** Modular Python scripts for easy customization and extension.
+| `--file-columns` | comma-separated list | Candidate file-column names to check for file paths (e.g. `documents,images,files`). If omitted the tool falls back to `--images-col` (or the `images` column). |
 
 ---
 
@@ -270,6 +271,11 @@ No additional flags are needed — all options are embedded in the template.
 ```bash
 python ia-templatizer.py [flags] <template_path> <csv_path> <output_path>
 ```
+Note: When a template does not provide an explicit `drop_child_pages` value,
+the tool defaults to preserving the parent item row and dropping child page
+rows (i.e. parent-only output). To force the alternate (legacy) behaviour
+that attaches page images to parents and emits continuation rows, set
+`"drop_child_pages": false` in the template's `options` section.
 
 - `<template_path>`: Path to your metadata template JSON file.
 - `<csv_path>`: Path to your input CSV file.

@@ -76,15 +76,27 @@ def _mapping_from_dict(mapping_raw: dict) -> list:
     return result
 
 
-def _is_image_only(row: dict, images_col: str) -> bool:
-    """True when every field is blank except (possibly) the images column."""
-    return not any(v.strip() for k, v in row.items() if k != images_col)
+def _is_image_only(row: dict, images_col) -> bool:
+    """True when every field is blank except (possibly) the images column(s).
+
+    ``images_col`` may be a single column name (str) or an iterable of
+    candidate file-column names (list/tuple). A row is considered an
+    "image-only"/continuation row when all non-file columns are empty.
+    """
+    if isinstance(images_col, str):
+        file_cols = {images_col}
+    else:
+        try:
+            file_cols = set(images_col)
+        except Exception:
+            file_cols = {images_col}
+    return not any(v.strip() for k, v in row.items() if k not in file_cols)
 
 
 def apply_mapping(
     rows: list,
     column_mapping: list,
-    images_col: str = "images",
+    images_col = "images",
     delimiter: str = "|@|",
     source_fieldnames: list = None,
 ) -> list:
@@ -101,9 +113,20 @@ def apply_mapping(
     - The images column is always mapped to "file" regardless of the mapping CSV
       (unless the mapping CSV already maps it explicitly).
     """
-    # Build a quick lookup: does the mapping CSV already handle images_col → file?
+    # Build a quick lookup: does the mapping CSV already handle any of the
+    # candidate file columns → file? ``images_col`` may be a single name or
+    # a list; normalise to a list and check whether at least one candidate is
+    # not covered by the mapping CSV. If so, we'll implicitly carry those
+    # values into the "file" bucket.
     mapped_cols = {src for src, _ in column_mapping}
-    implicit_file_map = images_col not in mapped_cols
+    if isinstance(images_col, str):
+        images_cols = [images_col]
+    else:
+        try:
+            images_cols = list(images_col)
+        except Exception:
+            images_cols = [images_col]
+    implicit_file_map = any(col not in mapped_cols for col in images_cols)
 
     remapped = []
     last_identifier = ""
@@ -126,13 +149,16 @@ def apply_mapping(
                     if part not in buckets[field_key]:
                         buckets[field_key].append(part)
 
-        # Always carry the images column over as "file" if not covered by mapping
+        # Always carry any candidate file columns over as "file" if not
+        # covered by the mapping CSV. Check each candidate in order and
+        # append non-empty values into the buckets['file'] list.
         if implicit_file_map:
-            img_val = row.get(images_col, "").strip()
-            if img_val and img_val not in buckets["file"]:
-                buckets["file"].append(img_val)
+            for col in images_cols:
+                img_val = row.get(col, "").strip()
+                if img_val and img_val not in buckets["file"]:
+                    buckets["file"].append(img_val)
 
-        is_continuation = _is_image_only(row, images_col)
+        is_continuation = _is_image_only(row, images_cols)
         if is_continuation:
             # Propagate the parent item's identifier to this continuation row.
             if last_identifier and not buckets.get("identifier"):

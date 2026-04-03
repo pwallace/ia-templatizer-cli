@@ -1,0 +1,53 @@
+{
+  "defaults": {
+    "mediatype": "texts",
+    "collection": ["hamilton-college"],
+    "related-url-base": "https://litsdigital.hamilton.edu/do/",
+    "rights-statement": "http://rightsstatements.org/vocab/NKC/1.0/",
+    "rights": "For questions or information about duplication, licensing, or copyright status for this item, contact <a href=\"https://www.hamilton.edu/offices/lits/special-collections\" rel=\"ugc nofollow\">Hamilton College Special Collections</a>.",
+    "subject": [
+      "Hamilton College",
+      "Oneida Community",
+      "Communal societies",
+      "Intentionalism",
+      "Utopian socialism",
+      "Socialism",
+      "Noyes, John Humphrey, 1811-1886",
+      "Periodicals",
+      "Newspapers"
+    ],
+    "notes": "Digitized by LITS Digital Collections, Hamilton College",
+    "source": [
+      "Hamilton College Library Rare Books and Special Collections",
+      "Communal Societies Collection",
+      "Oneida Community Collection",
+      "Folio HX656.O5 A46",
+      "Hamilton College Library, Clinton, New York, United States"
+    ]
+  },
+  "mapping": {
+    "mods_identifier_local": "identifier",
+    "files": "file",
+    "mods_titleinfo_title": "title",
+    "mods_name_personal_namepart_refined": "creator",
+    "mods_personal_name_author": "creator",
+    "mods_origininfo_dateissued": "date",
+    "date_full": "!date",
+    "mods_language_languageterm_text": "language",
+    "mods_physicaldescription_extent": "extent",
+    "mods_note": "notes",
+    "mods_genre_authority_local": "genre",
+    "mods_genre_subgenre_authority_local": "genre",
+    "mods_subject_geographic": "subject",
+    "mods_subject_topic": "subject",
+    "mods_subject_family_name": "subject",
+    "mods_origininfo_place_placeterm_text": "location",
+    "mods_accesscondition_use_and_reproduction": "rights-statement"
+  },
+  "options": {
+    "flatten": false,
+    "file_columns": ["files"],
+    "drop_child_pages": false,
+    "delimiter": "|@|"
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "defaults": {
+    "mediatype": "texts",
+    "related-url-base": "https://litsdigital.hamilton.edu/do/",
+    "rights-statement": "http://rightsstatements.org/vocab/NKC/1.0/",
+    "rights": "For questions or information about duplication, licensing, or copyright status for this item, contact <a href=\"https://www.hamilton.edu/offices/lits/special-collections\" rel=\"ugc nofollow\">Hamilton College Special Collections</a>.",
+    "subject": [
+      "Hamilton College",
+      "Communal societies",
+      "Shakers",
+      "United Society of Believers in Christ's Second Appearing"
+    ],
+    "notes": "Digitized by LITS Digital Collections, Hamilton College",
+    "source": [
+      "Hamilton College Library Rare Books and Special Collections",
+      "Communal Societies Collection",
+      "Shaker Collection",
+      "Hamilton College Library, Clinton, New York, United States"
+    ]
+  },
+  "mapping": {
+    "mods_identifier_local": "identifier",
+    "files": "file",
+    "mods_titleinfo_title": "title",
+    "mods_name_personal_namepart_refined": "creator",
+    "mods_personal_name_photographer": "creator",
+    "mods_corporate_name_photographer": "creator",
+    "mods_name_corporate": "creator",
+    "mods_origininfo_dateissued": "date",
+    "date_full": "!date",
+    "mods_language_languageterm_text": "language",
+    "mods_physicaldescription_extent": "extent",
+    "mods_note": "description",
+    "mods_genre_authority_local": "genre",
+    "mods_genre_subgenre_authority_local": "subject",
+    "mods_genre_subgenre_visual_materials": "subject",
+    "mods_subject_geographic": "subject",
+    "mods_subject_topic": "subject",
+    "mods_subject_family_name": "subject",
+    "mods_subject_corporate_name": "subject",
+    "mods_subject_personal_name": "subject",
+    "mods_origininfo_place_placeterm_text": "location",
+    "mods_accesscondition_use_and_reproduction": "rights-statement",
+    "mods_origininfo_publisher": "publisher"
+  },
+  "options": {
+    "flatten": true,
+    "file_columns": ["images"],
+    "drop_child_pages": false,
+    "delimiter": "|@|"
+  }
+}

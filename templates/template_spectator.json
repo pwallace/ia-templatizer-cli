@@ -1,0 +1,45 @@
+{
+  "defaults": {
+    "mediatype": "texts",
+    "collection": ["hamilton-college"],
+    "creator": "Hamilton College Spectator",
+    "publisher": "Hamilton College (Clinton, N.Y.)",
+    "contributor": "Hamilton College",
+    "related-url-base": "https://litsdigital.hamilton.edu/do/",
+    "rights": "For questions or information about duplication, licensing, or copyright status for this item, contact <a href=\"https://www.hamilton.edu/offices/lits/special-collections\" rel=\"ugc nofollow\">Hamilton College Special Collections</a>.",
+    "description": "The Spectator is the current weekly student newspaper of Hamilton College. It began printing in 1947 and runs during the academic year. The Spectator was preceded by Hamiltonews (1942-1947), Hamilton Life (1899-1942), and Hamilton Campus (1866-1869).",
+    "subject": [
+      "Hamilton College",
+      "College archives",
+      "College newspapers",
+      "Student newspapers",
+      "Student life",
+      "Spectator",
+      "Clinton (N.Y.)"
+    ],
+    "notes": "Digitized by LITS Digital Collections, Hamilton College",
+    "source": [
+      "Hamilton College Archives",
+      "Communal Societies Collection",
+      "Oversize HAM COLL HQ H193",
+      "Hamilton College Library, Clinton, New York, United States"
+    ]
+  },
+  "mapping": {
+    "local_identifier": "identifier",
+    "files": "file",
+    "title": "title",
+    "date_full": "date",
+    "language": "language",
+    "extent": "extent",
+    "volume": "volume",
+    "issue": "issue",
+    "rights_statements": "rights"
+  },
+  "options": {
+    "flatten": true,
+    "file_columns": ["documents", "images"],
+    "drop_child_pages": true,
+    "delimiter": "|@|"
+  }
+}
